@@ -282,7 +282,7 @@ class Trainer(object):
         else:
             self.pss_loss_fun = None
         self.load_balance_weight = model_config.get('load_balance_weight', 0.01)
-        # v7-fix3: 禁用 fix2-hotfix 的 detail bias / router L2，使用纯 Q 驱动 Router
+        # 纯 Q 驱动 Router（不使用 detail bias / router L2 等辅助正则）
         self.detail_bias_weight = model_config.get('detail_bias_weight', 0.0)
         self.router_reg_weight = model_config.get('router_reg_weight', 0.0)
         self.PD_FA = PD_FA()
@@ -446,7 +446,7 @@ class Trainer(object):
                     gl_loss, _, _ = self.gl_loss_fun(position_map, scale_map, labels_original)
                     loss = loss + gl_loss
 
-            # 3) v7-fix2-hotfix: 阻止 Q-Router 把 gate 系统性压低
+            # 3) 防止 Q-Router 把 gate 系统性压低（detail bias 正则）
             if self.arch == 'pss':
                 gates = pss_state.get('gates')
                 if gates is not None:

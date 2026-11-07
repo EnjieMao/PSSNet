@@ -12,21 +12,21 @@ P/S/Q 不是三个相互独立的先验，而是目标在第 l 个编码层级�
     S_l : 当前层级目标的等效尺度，应以多大的空间范围观察目标及背景
     Q_l : 目标经历下一次分辨率压缩时发生证据稀释/消失的风险分数
 
-当前版本（v6）采用状态驱动设计：
-  - Encoder: P/S/Q 状态估计 + ADF（S 控制观测范围）+ Q-Router（Q 控制下采样）
-  - Neck: State-conditioned FiLM（S/Q 调制多尺度特征）
-  - Decoder: P-guided 目标/背景证据选择 + 位置状态链
+PSS-Net 采用状态驱动设计（对应论文方法部分）：
+  - Encoder: P/S/Q 目标状态估计 + ADF（S 条件观测几何）+ NSR（Q 生存感知分辨率转换）
+  - Neck: FDN 频率分解 Neck（neck_type='freq'；'film' 为轻量替代实现）
+  - Decoder: PCER（P 引导的目标/背景证据选择）+ 位置状态链
 
-主要 config
+主要 config（默认值与 configs/ 中各数据集配置一致）
 ------------------------------------------------------------
-base_channels(32) / use_se(True)
+base_channels(16) / use_se(True)
 use_pss_heads(True)       关闭后退化为纯 U-Net baseline
-use_scale_rf(True)        S 条件目标-背景观测几何
-use_risk_downsample(True) 生存感知分辨率转换；关闭则用 MaxPool+Conv
-q_gain_init(4.0)          Q 对 gate 的偏置强度
+use_scale_rf(True)        S 条件目标-背景观测几何（ADF）
+use_risk_downsample(True) NSR 生存感知分辨率转换；关闭则用 MaxPool+Conv
+q_gain_init(1.5)          Q 门控增益初始值
 use_pos_skip(True)        decoder 跳跃连接的 P 增强
-use_neck(True)            是否使用 FiLM Neck
-neck_type('film')         'film' 轻量版
+use_neck(True)            是否使用 Neck
+neck_type('freq')         'freq'=FDN（论文设计）；'film'=轻量替代
 
 Forward
 ------------------------------------------------------------
@@ -256,7 +256,7 @@ class BlurPool2d(nn.Module):
 
 class NeuralStateRouter(nn.Module):
     """
-    生存感知分辨率转换 / Detail-Context 分辨率融合（v7-fix3 + 对照模式）。
+    生存感知分辨率转换 / Detail-Context 分辨率融合（含 fixed/scalar 等对照模式）。
 
     候选路径：
         F_D = Conv(PixelUnshuffle(F))           detail，保留局部排列与高频细节
@@ -353,7 +353,7 @@ class NeuralStateRouter(nn.Module):
             q_half = F.max_pool2d(q, 2) if q is not None else torch.zeros_like(f_d[:, :1])
             q_prob = torch.sigmoid(q_half)
 
-            # v7-fix3：纯 Q 驱动，无 feat_term，避免网络学负偏置压低 detail
+            # 纯 Q 驱动门控（无额外特征项，避免网络学负偏置压低 detail 分支）
             q_gain = 2.0 * torch.sigmoid(self.q_gain_raw)  # (0, 2)
             # q_prob=0.5 -> gate=0.5；q_prob=1 -> gate≈0.82（q_gain=1.5）
             q_term = q_gain * (2.0 * q_prob - 1.0)
@@ -363,7 +363,7 @@ class NeuralStateRouter(nn.Module):
             # 高风险目标额外增强 detail 证据，使 Q 对分辨率转换有不可绕过影响
             out = out + q_prob * F.silu(self.detail_enhance(f_d))
 
-        # 反事实生存评估仅保留输出供诊断
+        # 生存评估支路仅保留输出用于诊断，不参与门控
         u_d = self.surv_eval(f_d)
         u_c = self.surv_eval(f_c)
         return (out, gate, (u_d, u_c))
@@ -446,13 +446,14 @@ class ConvContextBlock(nn.Module):
 
 
 # ============================================================
-# 6. State-conditioned FiLM Neck
+# 6. Frequency Decomposition Neck (FDN) / FiLM 轻量替代
 # ============================================================
 
 
 class StateConditionedModulation(nn.Module):
     """
-    Neck 子模块：State-conditioned Feature Modulation（FiLM）。
+    Neck 子模块：'freq' 为 Frequency Decomposition Neck（FDN，论文设计）；
+    'film' 为 State-conditioned Feature Modulation 轻量替代。
 
     用 S/Q 状态对 encoder 特征做 FiLM 式调制：
         \hat F_l = \gamma(Z_l) \odot F_l + \beta(Z_l),
@@ -767,8 +768,8 @@ class PSSDecoderBlock(nn.Module):
 
     这保留了 PSS 设计中 "P 控制空间证据选择" 的核心思想。
 
-    v7-fix3：恢复 fix1 的完整 P-gating， Encoder P 只作为状态估计器，
-    在 decoder 中 detach 使用，防止 P head 退化为"分支选择器"。
+    Encoder P 仅作为状态估计器，在 decoder 中 detach 使用，
+    防止 P head 退化为"分支选择器"。
     gate_alpha/gate_beta：门控界 G_P = alpha + beta*sigmoid(P)，默认 0.1/0.8。
     """
 
@@ -786,7 +787,7 @@ class PSSDecoderBlock(nn.Module):
             nn.BatchNorm2d(c_low),
             nn.SiLU(inplace=True),
         )
-        # v7: target_branch 强调目标高频/局部细节
+        # target_branch：强调目标高频/局部细节
         self.target_branch = nn.Sequential(
             nn.Conv2d(c_low, c_low, kernel_size=3, padding=2,
                       dilation=2, groups=c_low, bias=False),
@@ -794,7 +795,7 @@ class PSSDecoderBlock(nn.Module):
             nn.SiLU(inplace=True),
             nn.Conv2d(c_low, c_low, kernel_size=1, bias=False),
         )
-        # v7: context_branch 强调背景平滑/低频上下文
+        # context_branch：强调背景平滑/低频上下文
         self.context_branch = nn.Sequential(
             nn.AvgPool2d(kernel_size=3, stride=1, padding=1),
             nn.Conv2d(c_low, c_low, kernel_size=7, padding=3,
