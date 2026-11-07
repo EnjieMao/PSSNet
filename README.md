@@ -78,7 +78,7 @@ python train.py --dataset NUDT-SIRST --mode test \
 
 ## Pretrained weights
 
-Available in [Releases](../../releases) (one checkpoint per dataset).
+Available in [Releases](https://github.com/EnjieMao/PSSNet/releases/tag/v1.0.0) (one checkpoint per dataset).
 
 ## Citation
 
