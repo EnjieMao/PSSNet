@@ -21,7 +21,7 @@ adaptive feature transformation:
 | NUDT-SIRST| 95.48 | 99.15  | 0.25      |        |      |
 | IRSTD-1k  | 71.20 | 92.59  | 13.30     |        |      |
 
-(1.02M–3.98M parameters depending on dataset configuration; see `configs/`.)
+All configurations use 1.02\,M parameters.
 
 ## Installation
 

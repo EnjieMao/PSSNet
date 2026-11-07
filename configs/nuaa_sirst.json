@@ -1,6 +1,6 @@
 {
   "arch": "pss",
-  "base_channels": 32,
+  "base_channels": 16,
   "use_se": true,
   "use_pss_heads": true,
   "use_scale_rf": true,
@@ -13,7 +13,7 @@
   "use_pss_decoder": true,
   "use_neck": true,
   "neck_type": "freq",
-  "neck_proj_ch": 64,
+  "neck_proj_ch": 32,
   "use_mamba": false,
   "pos_weight": 1.0,
   "pos2_weight": 0.5,
