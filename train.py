@@ -3,10 +3,10 @@ train.py — GL-Net 统一训练/测试入口。
 
 功能：
   - 解析命令行参数与 --model-config（JSON 消融配置，见 configs/ 目录）
-  - 构建 GSFANet（model/gl_net_paper.py），按配置开关 MS-Fusion / SA-Lock 等模块
+  - 构建 PSS-Net（model/pss_net.py），按配置开关 ADF/NSR/FDN/PCER 等模块
   - 训练循环：主分割损失（DiceFocalBCELoss）+ 深监督 + 双先验监督（GlobalLockLoss）
   - 优化器：Adam + GradualWarmup + CosineAnnealing；epoch 300 起评测，按 IoU 保存最优权重
-  - 输出：weight/<数据集>/GSFANet-<实验名>-<时间戳>/ 下的 checkpoint、metric.log、源码快照
+  - 输出：weight/<数据集>/PSSNet-<实验名>-<时间戳>/ 下的 checkpoint、metric.log、源码快照
 
 用法示例：
   python train.py --mode train --dataset NUAA-SIRST --dataset-root ./dataset \
@@ -23,10 +23,6 @@ try:
     mp.set_start_method('spawn', force=True)
 except RuntimeError:
     pass
-try:
-    from model.gl_net_paper import GSFANet
-except Exception:
-    GSFANet = None
 from model.pss_net import PSSNet
 from model.loss import *
 from torch.optim import Adagrad
@@ -203,7 +199,7 @@ class Trainer(object):
         # 先解析配置，便于根据配置调整 val_loader batch size
         model_config = parse_model_config(args.model_config)
         self.model_config = model_config
-        self.arch = model_config.get('arch', 'gsfa')
+        self.arch = model_config.get('arch', 'pss')
 
         self.train_loader = Data.DataLoader(trainset, args.batch_size, shuffle=True, drop_last=True, num_workers=4,
                                             pin_memory=True, persistent_workers=False,
@@ -221,13 +217,9 @@ class Trainer(object):
                                                      args.ngpu < torch.cuda.device_count() else 'cpu')
         self.device = device
 
-        if self.arch == 'pss':
-            model = PSSNet(args.crop_size, 1, config=model_config)
-        else:
-            if GSFANet is None:
-                raise RuntimeError(
-                    'model/gl_net_paper.py 不存在，当前仅支持 arch="pss"')
-            model = GSFANet(args.crop_size, 1, config=model_config)
+        if self.arch != 'pss':
+            raise RuntimeError('Only arch="pss" (PSS-Net) is supported.')
+        model = PSSNet(args.crop_size, 1, config=model_config)
 
         if args.multi_gpus:
             if torch.cuda.device_count() > 1:
@@ -318,7 +310,7 @@ class Trainer(object):
                     # 防止 exp_name 中的 '/' 创建额外子目录
                     safe_exp_name = args.exp_name.replace('/', '_').replace('\\', '_')
                     suffix = '%s-%s' % (safe_exp_name, suffix)
-                self.save_folder = 'weight/%s/GSFANet-%s' % (args.dataset, suffix)
+                self.save_folder = 'weight/%s/PSSNet-%s' % (args.dataset, suffix)
                 if not osp.exists(self.save_folder):
                     os.makedirs(self.save_folder)
                 self._save_source_code(osp.join(self.save_folder, 'src'))

@@ -66,8 +66,7 @@ python train.py --dataset IRSTD-1k --epochs 600 --test-start-epoch 200 \
 ```
 
 The best model (`weight-<dataset>.pkl`), training log and checkpoints are saved under
-`weight/<dataset>/GSFANet-<exp_name>-<timestamp>/` (the `GSFANet-` prefix is a legacy
-artifact of the training script).
+`weight/<dataset>/PSSNet-<exp_name>-<timestamp>/`.
 
 ## Testing
 
